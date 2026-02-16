@@ -1,3 +1,6 @@
 flask
 requests
+boto3
+requests-aws4auth
+python-dotenv
 gunicorn
