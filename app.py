@@ -58,6 +58,24 @@ def airtable_test():
 
     return jsonify({"status": "airtable connected", "records": len(records)})
 
+@app.route("/amazon-test")
+def amazon_test():
+    print("📡 /amazon-test HIT", flush=True)
+
+    try:
+        token = get_amazon_token()
+        print("✅ Amazon token received", flush=True)
+
+        return jsonify({
+            "status": "amazon connected",
+            "token_received": True
+        })
+
+    except Exception as e:
+        print("❌ Amazon test failed:", str(e), flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/health")
 def health():
     print("❤️ Health check", flush=True)
