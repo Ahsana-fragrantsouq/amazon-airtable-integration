@@ -4,116 +4,61 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-print("🚀 App starting...")
+print("🚀 App starting...", flush=True)
 
-# ======================
-# AMAZON CREDENTIALS
-# ======================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("AMZ_REFRESH_TOKEN")
-SELLER_ID = os.getenv("AMZ_SELLER_ID")
 
-print("🔐 Amazon Env Check")
-print("CLIENT_ID:", "✅ SET" if CLIENT_ID else "❌ MISSING")
-print("CLIENT_SECRET:", "✅ SET" if CLIENT_SECRET else "❌ MISSING")
-print("REFRESH_TOKEN:", "✅ SET" if REFRESH_TOKEN else "❌ MISSING")
-print("SELLER_ID:", "✅ SET" if SELLER_ID else "❌ MISSING")
-
-# ======================
-# AIRTABLE CREDENTIALS
-# ======================
 AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 TABLE = os.getenv("AIRTABLE_TABLE")
 
-print("📦 Airtable Env Check")
-print("AIRTABLE_TOKEN:", "✅ SET" if AIRTABLE_TOKEN else "❌ MISSING")
-print("BASE_ID:", "✅ SET" if BASE_ID else "❌ MISSING")
-print("TABLE:", "✅ SET" if TABLE else "❌ MISSING")
+print("🔐 Env check:", flush=True)
+print("CLIENT_ID:", bool(CLIENT_ID), flush=True)
+print("CLIENT_SECRET:", bool(CLIENT_SECRET), flush=True)
+print("REFRESH_TOKEN:", bool(REFRESH_TOKEN), flush=True)
+print("AIRTABLE_TOKEN:", bool(AIRTABLE_TOKEN), flush=True)
 
-# ======================
-# AMAZON TOKEN
-# ======================
 def get_amazon_token():
-    print("🔑 Requesting Amazon access token...")
+    print("🔑 Requesting Amazon token...", flush=True)
 
-    url = "https://api.amazon.com/auth/o2/token"
-    payload = {
-        "grant_type": "refresh_token",
-        "refresh_token": REFRESH_TOKEN,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET
-    }
+    r = requests.post(
+        "https://api.amazon.com/auth/o2/token",
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": REFRESH_TOKEN,
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        }
+    )
 
-    response = requests.post(url, data=payload)
+    print("🟡 Amazon token status:", r.status_code, flush=True)
+    print("🟡 Amazon token response:", r.text, flush=True)
 
-    print("🟡 Amazon Token Status Code:", response.status_code)
-    print("🟡 Amazon Token Response:", response.text)
+    r.raise_for_status()
+    return r.json()["access_token"]
 
-    response.raise_for_status()
-
-    token = response.json().get("access_token")
-    print("✅ Amazon token received")
-
-    return token
-
-# ======================
-# AMAZON TEST
-# ======================
-@app.route("/amazon-test")
-def amazon_test():
-    print("📡 /amazon-test endpoint hit")
-
-    try:
-        token = get_amazon_token()
-        return jsonify({
-            "status": "amazon connected",
-            "token_received": bool(token)
-        })
-
-    except Exception as e:
-        print("❌ Amazon test failed:", str(e))
-        return jsonify({"error": str(e)}), 500
-
-# ======================
-# AIRTABLE TEST
-# ======================
 @app.route("/airtable-test")
 def airtable_test():
-    print("📡 /airtable-test endpoint hit")
+    print("📡 /airtable-test HIT", flush=True)
 
-    try:
-        url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE}"
-        headers = {
-            "Authorization": f"Bearer {AIRTABLE_TOKEN}"
-        }
+    url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE}"
+    headers = {"Authorization": f"Bearer {AIRTABLE_TOKEN}"}
 
-        print("🔍 Airtable URL:", url)
+    r = requests.get(url, headers=headers)
 
-        response = requests.get(url, headers=headers)
+    print("🟡 Airtable status:", r.status_code, flush=True)
+    print("🟡 Airtable response length:", len(r.text), flush=True)
 
-        print("🟡 Airtable Status Code:", response.status_code)
-        print("🟡 Airtable Response:", response.text)
+    r.raise_for_status()
 
-        response.raise_for_status()
+    records = r.json().get("records", [])
+    print(f"✅ Airtable records: {len(records)}", flush=True)
 
-        records = response.json().get("records", [])
-        print(f"✅ Airtable connected, records found: {len(records)}")
+    return jsonify({"status": "airtable connected", "records": len(records)})
 
-        return jsonify({
-            "status": "airtable connected",
-            "records": len(records)
-        })
-
-    except Exception as e:
-        print("❌ Airtable test failed:", str(e))
-        return jsonify({"error": str(e)}), 500
-
-# ======================
-# HEALTH
-# ======================
 @app.route("/health")
 def health():
-    print("❤️ Health check hit")
+    print("❤️ Health check", flush=True)
     return "OK", 200
