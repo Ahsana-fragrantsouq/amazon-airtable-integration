@@ -30,21 +30,29 @@ print("🔧 AWS REGION:", AWS_REGION)
 # ======================================================
 def get_lwa_token():
     print("🔐 Requesting LWA token...")
+
     url = "https://api.amazon.com/auth/o2/token"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
     payload = {
         "grant_type": "client_credentials",
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "sellingpartnerapi::migration"
+        "scope": "sellingpartnerapi::notifications"
     }
 
-    r = requests.post(url, data=payload, timeout=30)
-    print("🔐 LWA response status:", r.status_code)
-    r.raise_for_status()
+    r = requests.post(url, data=payload, headers=headers, timeout=30)
 
-    token = r.json()["access_token"]
+    print("🔐 LWA response status:", r.status_code)
+    print("🔐 LWA response body:", r.text)   # 🔥 IMPORTANT DEBUG LINE
+
+    r.raise_for_status()
     print("✅ LWA token received")
-    return token
+
+    return r.json()["access_token"]
+
 
 # ======================================================
 # 2️⃣ AWS ROLE ASSUME
