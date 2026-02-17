@@ -186,5 +186,25 @@ def airtable_test():
 
 @app.route("/amazon-orders-test")
 def amazon_orders_test():
-    print("🚀 AMAZON ORDERS ROUTE REACHED", flush=True)
-    return jsonify({"status": "route reached"})
+    print("🚀 /amazon-orders-test HIT", flush=True)
+
+    try:
+        orders = get_orders()
+
+        print("✅ Orders fetched:", len(orders), flush=True)
+
+        # Log first order only (safe)
+        if orders:
+            first = orders[0]
+            print("🧾 Sample Order ID:", first.get("AmazonOrderId"), flush=True)
+            print("🧾 Order Status:", first.get("OrderStatus"), flush=True)
+
+        return jsonify({
+            "status": "orders fetched",
+            "count": len(orders)
+        })
+
+    except Exception as e:
+        print("❌ Error fetching orders:", str(e), flush=True)
+        return jsonify({"error": str(e)}), 500
+
