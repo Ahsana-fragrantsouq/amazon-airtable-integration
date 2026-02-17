@@ -1,11 +1,18 @@
 import os
 import requests
 from flask import Flask, jsonify
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# ======================================================
+# STARTUP LOG
+# ======================================================
 print("🚀 App starting...", flush=True)
 
+# ======================================================
+# ENV VARIABLES
+# ======================================================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("AMZ_REFRESH_TOKEN")
@@ -14,12 +21,26 @@ AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 TABLE = os.getenv("AIRTABLE_TABLE")
 
+# ======================================================
+# ENV CHECK
+# ======================================================
 print("🔐 Env check:", flush=True)
 print("CLIENT_ID:", bool(CLIENT_ID), flush=True)
 print("CLIENT_SECRET:", bool(CLIENT_SECRET), flush=True)
 print("REFRESH_TOKEN:", bool(REFRESH_TOKEN), flush=True)
 print("AIRTABLE_TOKEN:", bool(AIRTABLE_TOKEN), flush=True)
+print("BASE_ID:", bool(BASE_ID), flush=True)
+print("TABLE:", bool(TABLE), flush=True)
 
+# ======================================================
+# AMAZON CONFIG
+# ======================================================
+MARKETPLACE_ID = "A2VIGQ35RCS4UG"   # UAE
+AMAZON_API_BASE = "https://sellingpartnerapi-eu.amazon.com"
+
+# ======================================================
+# AMAZON TOKEN
+# ======================================================
 def get_amazon_token():
     print("🔑 Requesting Amazon token...", flush=True)
 
@@ -34,17 +55,98 @@ def get_amazon_token():
     )
 
     print("🟡 Amazon token status:", r.status_code, flush=True)
-    print("🟡 Amazon token response:", r.text, flush=True)
+    r.raise_for_status()
+
+    print("✅ Amazon token received", flush=True)
+    return r.json()["access_token"]
+
+# ======================================================
+# AMAZON ORDERS
+# ======================================================
+def get_orders():
+    print("📦 Fetching Amazon orders...", flush=True)
+
+    token = get_amazon_token()
+
+    headers = {
+        "x-amz-access-token": token,
+        "Content-Type": "application/json"
+    }
+
+    created_after = (datetime.utcnow() - timedelta(days=2)).isoformat()
+
+    params = {
+        "MarketplaceIds": MARKETPLACE_ID,
+        "CreatedAfter": created_after
+    }
+
+    url = f"{AMAZON_API_BASE}/orders/v0/orders"
+
+    r = requests.get(url, headers=headers, params=params)
+
+    print("🟡 Orders API status:", r.status_code, flush=True)
+    print("🟡 Orders API response length:", len(r.text), flush=True)
 
     r.raise_for_status()
-    return r.json()["access_token"]
+
+    orders = r.json().get("payload", {}).get("Orders", [])
+    print(f"✅ Orders fetched: {len(orders)}", flush=True)
+
+    return orders
+
+# ======================================================
+# AMAZON ORDER ITEMS
+# ======================================================
+def get_order_items(order_id):
+    print(f"📦 Fetching items for order {order_id}", flush=True)
+
+    token = get_amazon_token()
+
+    headers = {
+        "x-amz-access-token": token,
+        "Content-Type": "application/json"
+    }
+
+    url = f"{AMAZON_API_BASE}/orders/v0/orders/{order_id}/orderItems"
+
+    r = requests.get(url, headers=headers)
+
+    print("🟡 OrderItems status:", r.status_code, flush=True)
+    r.raise_for_status()
+
+    items = r.json().get("payload", {}).get("OrderItems", [])
+    print(f"✅ Items found: {len(items)}", flush=True)
+
+    return items
+
+# ======================================================
+# ROUTES
+# ======================================================
+
+@app.route("/health")
+def health():
+    print("❤️ Health check", flush=True)
+    return "OK", 200
+
+
+@app.route("/amazon-test")
+def amazon_test():
+    print("📡 /amazon-test HIT", flush=True)
+    token = get_amazon_token()
+    return jsonify({
+        "status": "amazon connected",
+        "token_received": bool(token)
+    })
+
 
 @app.route("/airtable-test")
 def airtable_test():
     print("📡 /airtable-test HIT", flush=True)
 
     url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE}"
-    headers = {"Authorization": f"Bearer {AIRTABLE_TOKEN}"}
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_TOKEN}"
+    }
 
     r = requests.get(url, headers=headers)
 
@@ -56,27 +158,30 @@ def airtable_test():
     records = r.json().get("records", [])
     print(f"✅ Airtable records: {len(records)}", flush=True)
 
-    return jsonify({"status": "airtable connected", "records": len(records)})
-
-@app.route("/amazon-test")
-def amazon_test():
-    print("📡 /amazon-test HIT", flush=True)
-
-    try:
-        token = get_amazon_token()
-        print("✅ Amazon token received", flush=True)
-
-        return jsonify({
-            "status": "amazon connected",
-            "token_received": True
-        })
-
-    except Exception as e:
-        print("❌ Amazon test failed:", str(e), flush=True)
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "status": "airtable connected",
+        "records": len(records)
+    })
 
 
-@app.route("/health")
-def health():
-    print("❤️ Health check", flush=True)
-    return "OK", 200
+@app.route("/amazon-orders-test")
+def amazon_orders_test():
+    print("🚀 /amazon-orders-test HIT", flush=True)
+
+    orders = get_orders()
+
+    for order in orders:
+        order_id = order["AmazonOrderId"]
+        print("🧾 Order:", order_id, flush=True)
+
+        items = get_order_items(order_id)
+
+        for item in items:
+            print("   ├─ SKU:", item.get("SellerSKU"), flush=True)
+            print("   ├─ Qty:", item.get("QuantityOrdered"), flush=True)
+            print("   └─ Price:", item.get("ItemPrice", {}), flush=True)
+
+    return jsonify({
+        "status": "orders & items fetched",
+        "orders": len(orders)
+    })
