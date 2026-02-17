@@ -186,22 +186,5 @@ def airtable_test():
 
 @app.route("/amazon-orders-test")
 def amazon_orders_test():
-    print("🚀 /amazon-orders-test HIT", flush=True)
-
-    orders = get_orders()
-
-    for order in orders:
-        order_id = order["AmazonOrderId"]
-        print("🧾 Order:", order_id, flush=True)
-
-        items = get_order_items(order_id)
-
-        for item in items:
-            print("   ├─ SKU:", item.get("SellerSKU"), flush=True)
-            print("   ├─ Qty:", item.get("QuantityOrdered"), flush=True)
-            print("   └─ Price:", item.get("ItemPrice", {}), flush=True)
-
-    return jsonify({
-        "status": "orders & items fetched",
-        "orders": len(orders)
-    })
+    print("🚀 AMAZON ORDERS ROUTE REACHED", flush=True)
+    return jsonify({"status": "route reached"})
