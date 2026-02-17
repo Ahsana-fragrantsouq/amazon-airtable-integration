@@ -2,6 +2,7 @@ import os
 import requests
 from flask import Flask, jsonify
 from datetime import datetime, timedelta
+from requests_aws4auth import AWS4Auth
 
 app = Flask(__name__)
 
@@ -21,6 +22,10 @@ AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 TABLE = os.getenv("AIRTABLE_TABLE")
 
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+AWS_REGION = os.getenv("AWS_REGION")
+
 # ======================================================
 # ENV CHECK
 # ======================================================
@@ -29,17 +34,25 @@ print("CLIENT_ID:", bool(CLIENT_ID), flush=True)
 print("CLIENT_SECRET:", bool(CLIENT_SECRET), flush=True)
 print("REFRESH_TOKEN:", bool(REFRESH_TOKEN), flush=True)
 print("AIRTABLE_TOKEN:", bool(AIRTABLE_TOKEN), flush=True)
-print("BASE_ID:", bool(BASE_ID), flush=True)
-print("TABLE:", bool(TABLE), flush=True)
+print("AWS_ACCESS_KEY:", bool(AWS_ACCESS_KEY), flush=True)
+print("AWS_SECRET_KEY:", bool(AWS_SECRET_KEY), flush=True)
+print("AWS_REGION:", AWS_REGION, flush=True)
 
 # ======================================================
 # AMAZON CONFIG
 # ======================================================
-MARKETPLACE_ID = "A2VIGQ35RCS4UG"   # UAE
+MARKETPLACE_ID = "A2VIGQ35RCS4UG"  # UAE
 AMAZON_API_BASE = "https://sellingpartnerapi-eu.amazon.com"
 
+aws_auth = AWS4Auth(
+    AWS_ACCESS_KEY,
+    AWS_SECRET_KEY,
+    AWS_REGION,
+    "execute-api"
+)
+
 # ======================================================
-# AMAZON TOKEN
+# AMAZON TOKEN (LWA)
 # ======================================================
 def get_amazon_token():
     print("🔑 Requesting Amazon token...", flush=True)
@@ -82,10 +95,15 @@ def get_orders():
 
     url = f"{AMAZON_API_BASE}/orders/v0/orders"
 
-    r = requests.get(url, headers=headers, params=params)
+    r = requests.get(
+        url,
+        headers=headers,
+        params=params,
+        auth=aws_auth   # 🔥 REQUIRED
+    )
 
     print("🟡 Orders API status:", r.status_code, flush=True)
-    print("🟡 Orders API response length:", len(r.text), flush=True)
+    print("🟡 Orders API response:", r.text[:500], flush=True)
 
     r.raise_for_status()
 
@@ -109,9 +127,15 @@ def get_order_items(order_id):
 
     url = f"{AMAZON_API_BASE}/orders/v0/orders/{order_id}/orderItems"
 
-    r = requests.get(url, headers=headers)
+    r = requests.get(
+        url,
+        headers=headers,
+        auth=aws_auth   # 🔥 REQUIRED
+    )
 
     print("🟡 OrderItems status:", r.status_code, flush=True)
+    print("🟡 OrderItems response:", r.text[:500], flush=True)
+
     r.raise_for_status()
 
     items = r.json().get("payload", {}).get("OrderItems", [])
@@ -135,7 +159,7 @@ def amazon_test():
     token = get_amazon_token()
     return jsonify({
         "status": "amazon connected",
-        "token_received": bool(token)
+        "token_received": True
     })
 
 
@@ -144,15 +168,11 @@ def airtable_test():
     print("📡 /airtable-test HIT", flush=True)
 
     url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE}"
-    headers = {
-        "Authorization": f"Bearer {AIRTABLE_TOKEN}"
-    }
+    headers = {"Authorization": f"Bearer {AIRTABLE_TOKEN}"}
 
     r = requests.get(url, headers=headers)
 
     print("🟡 Airtable status:", r.status_code, flush=True)
-    print("🟡 Airtable response length:", len(r.text), flush=True)
-
     r.raise_for_status()
 
     records = r.json().get("records", [])
