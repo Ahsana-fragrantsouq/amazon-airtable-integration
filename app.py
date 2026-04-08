@@ -306,6 +306,23 @@ def debug():
         "order_line_items_table": ORDER_LINE_ITEMS_TABLE_ID,
     })
 
+@app.route("/test-airtable-direct")
+def test_airtable_direct():
+    token = os.getenv("AIRTABLE_TOKEN")
+    r = requests.get(
+        f"https://api.airtable.com/v0/{BASE_ID}/{CUSTOMERS_TABLE_ID}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        },
+        params={"maxRecords": 1}
+    )
+    return jsonify({
+        "status": r.status_code,
+        "response": r.json(),
+        "token_used": token[:15] + "..."
+    })
+
 # ======================================================
 # RUN
 # ======================================================
