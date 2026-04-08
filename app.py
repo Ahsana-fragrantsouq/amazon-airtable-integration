@@ -1,7 +1,5 @@
 import os
 import requests
-from dotenv import load_dotenv
-load_dotenv()
 from flask import Flask, jsonify
 from datetime import datetime, timedelta
 from requests_aws4auth import AWS4Auth
