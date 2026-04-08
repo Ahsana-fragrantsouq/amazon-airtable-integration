@@ -145,29 +145,7 @@ def get_amazon_token():
 #     print(f"✅ Amazon orders fetched: {len(orders)}", flush=True)
 #     return orders
 
-def get_amazon_order_items(token, order_id):
-    # Sandbox doesn't support orderItems — return dummy data
-    if not AMZ_PRODUCTION:
-        print("🧪 Sandbox mode — using dummy item", flush=True)
-        return [{
-            "Title": "Sandbox Test Product",
-            "SellerSKU": "TEST-SKU-001",
-            "QuantityOrdered": 1,
-            "ItemPrice": {"Amount": "99.99", "CurrencyCode": "USD"}
-        }]
 
-    print(f"📦 Fetching items for {order_id}", flush=True)
-    r = requests.get(
-        f"{AMAZON_API_BASE}/orders/v0/orders/{order_id}/orderItems",
-        headers={"x-amz-access-token": token, "Content-Type": "application/json"},
-        auth=aws_auth,
-        timeout=REQUEST_TIMEOUT
-    )
-    print("🟡 Items status:", r.status_code, flush=True)
-    r.raise_for_status()
-    items = r.json().get("payload", {}).get("OrderItems", [])
-    print(f"✅ Items found: {len(items)}", flush=True)
-    return items
 
 def get_amazon_order_items(token, order_id):
     print(f"📦 Fetching items for {order_id}", flush=True)
