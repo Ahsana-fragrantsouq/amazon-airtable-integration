@@ -191,26 +191,29 @@ def airtable_test():
 
 @app.route("/amazon-orders-test")
 def amazon_orders_test():
-    print("🚀 /amazon-orders-test HIT", flush=True)
-
     try:
-        orders = get_orders()
-
-        print("✅ Orders fetched:", len(orders), flush=True)
-
-        # Log first order only (safe)
-        if orders:
-            first = orders[0]
-            print("🧾 Sample Order ID:", first.get("AmazonOrderId"), flush=True)
-            print("🧾 Order Status:", first.get("OrderStatus"), flush=True)
-
-        return jsonify({
-            "status": "orders fetched",
-            "count": len(orders)
-        })
-
+        token = get_amazon_token()
+        headers = {
+            "x-amz-access-token": token,
+            "Content-Type": "application/json"
+        }
+        params = {
+             "MarketplaceIds": "ATVPDKIKX0DER",  # US marketplace for sandbox
+             "CreatedAfter": "2023-01-01T00:00:00Z"
+        }
+        r = requests.get(
+            f"{AMAZON_API_BASE}/orders/v0/orders",
+            headers=headers,
+            params=params,
+            auth=aws_auth
+        )
+        print("🟡 Orders API status:", r.status_code, flush=True)
+        print("🟡 Orders API response:", r.text[:500], flush=True)
+        r.raise_for_status()
+        orders = r.json().get("payload", {}).get("Orders", [])
+        return jsonify({"status": "ok", "count": len(orders), "orders": orders})
     except Exception as e:
-        print("❌ Error fetching orders:", str(e), flush=True)
+        print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
