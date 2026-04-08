@@ -197,9 +197,10 @@ def amazon_orders_test():
             "x-amz-access-token": token,
             "Content-Type": "application/json"
         }
+        # Sandbox EXACT static parameters - must match precisely
         params = {
-             "MarketplaceIds": "ATVPDKIKX0DER",  # US marketplace for sandbox
-             "CreatedAfter": "2023-01-01T00:00:00Z"
+            "MarketplaceIds": "ATVPDKIKX0DER",
+            "CreatedAfter": "TEST_CASE_200",  # ← Amazon sandbox static trigger
         }
         r = requests.get(
             f"{AMAZON_API_BASE}/orders/v0/orders",
@@ -207,11 +208,10 @@ def amazon_orders_test():
             params=params,
             auth=aws_auth
         )
-        print("🟡 Orders API status:", r.status_code, flush=True)
-        print("🟡 Orders API response:", r.text[:500], flush=True)
+        print("🟡 Status:", r.status_code, flush=True)
+        print("🟡 Response:", r.text[:500], flush=True)
         r.raise_for_status()
-        orders = r.json().get("payload", {}).get("Orders", [])
-        return jsonify({"status": "ok", "count": len(orders), "orders": orders})
+        return jsonify(r.json())
     except Exception as e:
         print("❌ Error:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
