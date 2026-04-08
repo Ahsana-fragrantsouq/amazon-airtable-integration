@@ -284,15 +284,16 @@ def ping():
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
     }), 200
 
-    @app.route("/debug")
-    def debug():
-        token = AIRTABLE_TOKEN or ""
-        return jsonify({
-            "token_length": len(token),
-             "token_start": token[:10] if token else "EMPTY",
-            "token_starts_with_pat": token.startswith("pat"),
-             "base_id": BASE_ID,
-                "customers_table": CUSTOMERS_TABLE_ID,
+@app.route("/debug")
+def debug():
+    token = AIRTABLE_TOKEN or ""
+    return jsonify({
+        "token_length": len(token),
+        "token_start": token[:10] if token else "EMPTY",
+        "token_starts_with_pat": token.startswith("pat"),
+        "base_id": BASE_ID,
+        "customers_table": CUSTOMERS_TABLE_ID,
+        "order_line_items_table": ORDER_LINE_ITEMS_TABLE_ID,
     })
 
 # ======================================================
