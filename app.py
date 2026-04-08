@@ -1,5 +1,7 @@
 import os
 import requests
+from dotenv import load_dotenv
+load_dotenv()
 from flask import Flask, jsonify
 from datetime import datetime, timedelta
 from requests_aws4auth import AWS4Auth
@@ -42,7 +44,8 @@ print("AWS_REGION:", AWS_REGION, flush=True)
 # AMAZON CONFIG
 # ======================================================
 MARKETPLACE_ID = "A2VIGQ35RCS4UG"  # UAE
-AMAZON_API_BASE = "https://sellingpartnerapi-eu.amazon.com"
+# Change this line
+AMAZON_API_BASE = "https://sandbox.sellingpartnerapi-eu.amazon.com"
 
 aws_auth = AWS4Auth(
     AWS_ACCESS_KEY,
@@ -86,14 +89,15 @@ def get_orders():
         "Content-Type": "application/json"
     }
 
-    created_after = (datetime.utcnow() - timedelta(days=2)).isoformat()
+    # created_after = (datetime.utcnow() - timedelta(days=2)).isoformat()
 
-    params = {
-        "MarketplaceIds": MARKETPLACE_ID,
-        "CreatedAfter": created_after
-    }
+    # params = {
+    #     "MarketplaceIds": MARKETPLACE_ID,
+    #     "CreatedAfter": created_after
+    # }
 
     url = f"{AMAZON_API_BASE}/orders/v0/orders"
+    params = {"MarketplaceIds": MARKETPLACE_ID}
 
     r = requests.get(
         url,
@@ -102,9 +106,12 @@ def get_orders():
         auth=aws_auth   # 🔥 REQUIRED
     )
 
+
+
     print("🟡 Orders API status:", r.status_code, flush=True)
     print("🟡 Orders API response:", r.text[:500], flush=True)
 
+    print("🔐 x-amz-access-token:", token[:20], "...", flush=True)
     r.raise_for_status()
 
     orders = r.json().get("payload", {}).get("Orders", [])
@@ -208,3 +215,5 @@ def amazon_orders_test():
         print("❌ Error fetching orders:", str(e), flush=True)
         return jsonify({"error": str(e)}), 500
 
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)
