@@ -34,10 +34,16 @@ AMAZON_API_BASE = (
     "https://sandbox.sellingpartnerapi-eu.amazon.com"
 )
 
-AIRTABLE_HEADERS = {
-    "Authorization": f"Bearer {AIRTABLE_TOKEN}",
-    "Content-Type":  "application/json"
-}
+# AIRTABLE_HEADERS = {
+#     "Authorization": f"Bearer {AIRTABLE_TOKEN}",
+#     "Content-Type":  "application/json"
+# }
+# REPLACE with a function
+def get_airtable_headers():
+    return {
+        "Authorization": f"Bearer {os.getenv('AIRTABLE_TOKEN')}",
+        "Content-Type":  "application/json"
+    }
 
 aws_auth = AWS4Auth(AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, "execute-api")
 amazon_lock = threading.Lock()
@@ -58,10 +64,9 @@ print("AWS_ACCESS_KEY:",    bool(AWS_ACCESS_KEY), flush=True)
 # AIRTABLE HELPERS
 # ======================================================
 def airtable_search(table_id, formula):
-    print(f"🔍 Searching | formula={formula}", flush=True)
     r = requests.get(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}",
-        headers=AIRTABLE_HEADERS,
+        headers=get_airtable_headers(),   # ← changed
         params={"filterByFormula": formula},
         timeout=REQUEST_TIMEOUT
     )
@@ -71,10 +76,9 @@ def airtable_search(table_id, formula):
     return records
 
 def airtable_create(table_id, fields):
-    print(f"📝 Creating | fields={list(fields.keys())}", flush=True)
     r = requests.post(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}",
-        headers=AIRTABLE_HEADERS,
+        headers=get_airtable_headers(),   # ← changed
         json={"fields": fields},
         timeout=REQUEST_TIMEOUT
     )
@@ -85,10 +89,9 @@ def airtable_create(table_id, fields):
     return r.json()
 
 def airtable_update(table_id, record_id, fields):
-    print(f"✏️ Updating {record_id}", flush=True)
     r = requests.patch(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}/{record_id}",
-        headers=AIRTABLE_HEADERS,
+        headers=get_airtable_headers(),   # ← changed
         json={"fields": fields},
         timeout=REQUEST_TIMEOUT
     )
