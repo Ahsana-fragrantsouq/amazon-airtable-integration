@@ -89,12 +89,16 @@ def airtable_create(table_id, fields):
     return r.json()
 
 def airtable_update(table_id, record_id, fields):
+    print(f"✏️ Updating {record_id}", flush=True)
+    print(f"🧾 Fields being sent: {fields}", flush=True)
     r = requests.patch(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}/{record_id}",
-        headers=get_airtable_headers(),   # ← changed
+        headers=get_airtable_headers(),
         json={"fields": fields},
         timeout=REQUEST_TIMEOUT
     )
+    print(f"🟡 Update status: {r.status_code}", flush=True)
+    print(f"🟡 Update response: {r.text[:300]}", flush=True)
     if r.status_code >= 400:
         print("❌ Update error:", r.text, flush=True)
         r.raise_for_status()
