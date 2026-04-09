@@ -151,7 +151,7 @@ def get_amazon_order_items(token, order_id):
     if not AMZ_PRODUCTION:
         print("🧪 Sandbox — using dummy item", flush=True)
         return [{
-            "Title": "Sandbox Test Product",
+            "Title": "amazon customer 1",
             "SellerSKU": "TEST-SKU-001",
             "QuantityOrdered": 1,
             "ItemPrice": {"Amount": "99.99", "CurrencyCode": "USD"}
