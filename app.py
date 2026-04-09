@@ -119,31 +119,31 @@ def get_amazon_token():
     print("✅ Amazon token received", flush=True)
     return r.json()["access_token"]
 
-# def get_amazon_orders(token):
-#     print("📦 Fetching Amazon orders...", flush=True)
-#     if AMZ_PRODUCTION:
-#         params = {
-#             "MarketplaceIds": MARKETPLACE_ID,
-#             "CreatedAfter":   (datetime.utcnow() - timedelta(days=2)).isoformat()
-#         }
-#     else:
-#         params = {
-#             "MarketplaceIds": "ATVPDKIKX0DER",
-#             "CreatedAfter":   "TEST_CASE_200"
-#         }
-#     r = requests.get(
-#         f"{AMAZON_API_BASE}/orders/v0/orders",
-#         headers={"x-amz-access-token": token, "Content-Type": "application/json"},
-#         params=params,
-#         auth=aws_auth,
-#         timeout=REQUEST_TIMEOUT
-#     )
-#     print("🟡 Orders status:", r.status_code, flush=True)
-#     print("🟡 Orders response:", r.text[:300], flush=True)
-#     r.raise_for_status()
-#     orders = r.json().get("payload", {}).get("Orders", [])
-#     print(f"✅ Amazon orders fetched: {len(orders)}", flush=True)
-#     return orders
+def get_amazon_orders(token):
+    print("📦 Fetching Amazon orders...", flush=True)
+    if AMZ_PRODUCTION:
+        params = {
+            "MarketplaceIds": MARKETPLACE_ID,
+            "CreatedAfter":   (datetime.utcnow() - timedelta(days=2)).isoformat()
+        }
+    else:
+        params = {
+            "MarketplaceIds": "ATVPDKIKX0DER",
+            "CreatedAfter":   "TEST_CASE_200"
+        }
+    r = requests.get(
+        f"{AMAZON_API_BASE}/orders/v0/orders",
+        headers={"x-amz-access-token": token, "Content-Type": "application/json"},
+        params=params,
+        auth=aws_auth,
+        timeout=REQUEST_TIMEOUT
+    )
+    print("🟡 Orders status:", r.status_code, flush=True)
+    print("🟡 Orders response:", r.text[:300], flush=True)
+    r.raise_for_status()
+    orders = r.json().get("payload", {}).get("Orders", [])
+    print(f"✅ Amazon orders fetched: {len(orders)}", flush=True)
+    return orders
 
 
 
