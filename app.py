@@ -1,8 +1,11 @@
 import os
+import csv
+import io
 import requests
 import threading
+from flask import Response  # add Response here
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request,Response  # add Response here
 from requests_aws4auth import AWS4Auth
 
 requests.adapters.DEFAULT_RETRIES = 3
@@ -393,16 +396,7 @@ def sync_all_orders_job():
         print("🎉 SYNC ALL finished", flush=True)
 
 
-@app.route("/sync-all", methods=["GET"])
-def sync_all():
-    print("🔥 /sync-all HIT", flush=True)
-    thread = threading.Thread(target=sync_all_orders_job)
-    thread.daemon = True
-    thread.start()
-    return jsonify({
-        "status": "Full sync started — last 30 days",
-        "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
-    }), 200
+
 
 # ======================================================
 # ROUTES
@@ -429,6 +423,138 @@ def ping():
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
     }), 200
 
+@app.route("/sync-all", methods=["GET"])
+def sync_all():
+    print("🔥 /sync-all HIT", flush=True)
+    thread = threading.Thread(target=sync_all_orders_job)
+    thread.daemon = True
+    thread.start()
+    return jsonify({
+        "status": "Full sync started — last 30 days",
+        "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
+    }), 200
+
+
+@app.route("/download-orders", methods=["GET"])
+def download_orders():
+    print("🔥 /download-orders HIT", flush=True)
+    try:
+        token = get_amazon_token()
+
+        # Fetch all orders
+        all_orders = []
+        if AMZ_PRODUCTION:
+            params = {
+                "MarketplaceIds": MARKETPLACE_ID,
+                "CreatedAfter": (datetime.utcnow() - timedelta(days=30)).isoformat()
+            }
+        else:
+            params = {
+                "MarketplaceIds": "ATVPDKIKX0DER",
+                "CreatedAfter": "TEST_CASE_200"
+            }
+
+        next_token = None
+        while True:
+            if next_token:
+                params["NextToken"] = next_token
+            r = requests.get(
+                f"{AMAZON_API_BASE}/orders/v0/orders",
+                headers={"x-amz-access-token": token, "Content-Type": "application/json"},
+                params=params,
+                auth=aws_auth,
+                timeout=REQUEST_TIMEOUT
+            )
+            r.raise_for_status()
+            payload    = r.json().get("payload", {})
+            orders     = payload.get("Orders", [])
+            next_token = payload.get("NextToken")
+            all_orders.extend(orders)
+            if not next_token:
+                break
+
+        print(f"✅ Total orders: {len(all_orders)}", flush=True)
+
+        # Build CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Header row
+        writer.writerow([
+            "Order ID",
+            "Order Status",
+            "Purchase Date",
+            "Buyer Name",
+            "Buyer Email",
+            "Sales Channel",
+            "Order Total",
+            "Currency",
+            "Fulfillment Channel",
+            "Ship Service Level",
+            "Product Name",
+            "SKU",
+            "Quantity",
+            "Item Price",
+        ])
+
+        # Data rows
+        for order in all_orders:
+            order_id     = order.get("AmazonOrderId", "")
+            order_status = order.get("OrderStatus", "")
+            purchase_date= order.get("PurchaseDate", "")[:10]
+            buyer_name   = order.get("BuyerInfo", {}).get("BuyerName", "")
+            buyer_email  = order.get("BuyerInfo", {}).get("BuyerEmail", "")
+            sales_channel= order.get("SalesChannel", "")
+            order_total  = order.get("OrderTotal", {}).get("Amount", "")
+            currency     = order.get("OrderTotal", {}).get("CurrencyCode", "")
+            fulfillment  = order.get("FulfillmentChannel", "")
+            ship_level   = order.get("ShipServiceLevel", "")
+
+            try:
+                items = get_amazon_order_items(token, order_id)
+            except:
+                items = []
+
+            if items:
+                for item in items:
+                    writer.writerow([
+                        order_id,
+                        order_status,
+                        purchase_date,
+                        buyer_name,
+                        buyer_email,
+                        sales_channel,
+                        order_total,
+                        currency,
+                        fulfillment,
+                        ship_level,
+                        item.get("Title", ""),
+                        item.get("SellerSKU", ""),
+                        item.get("QuantityOrdered", ""),
+                        item.get("ItemPrice", {}).get("Amount", ""),
+                    ])
+            else:
+                # Order with no items
+                writer.writerow([
+                    order_id, order_status, purchase_date,
+                    buyer_name, buyer_email, sales_channel,
+                    order_total, currency, fulfillment, ship_level,
+                    "", "", "", ""
+                ])
+
+        # Return as downloadable CSV
+        output.seek(0)
+        filename = f"amazon_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except Exception as e:
+        print("❌ Download error:", e, flush=True)
+        return jsonify({"error": str(e)}), 500
+    
 @app.route("/debug")
 def debug():
     token = AIRTABLE_TOKEN or ""
