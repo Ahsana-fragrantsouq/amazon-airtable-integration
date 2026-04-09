@@ -279,6 +279,127 @@ def sync_amazon_orders_job():
         amazon_lock.release()
         print("🎉 Amazon sync finished", flush=True)
 
+
+        # ======================================================
+# SYNC ALL — Last 30 days, full update
+# ======================================================
+def sync_all_orders_job():
+    if not amazon_lock.acquire(blocking=False):
+        print("⏳ Sync already running — skipped", flush=True)
+        return
+
+    print("⏰ SYNC ALL started", flush=True)
+
+    try:
+        token = get_amazon_token()
+
+        # Fetch all orders from last 30 days with pagination
+        all_orders = []
+        created_after = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        next_token = None
+
+        while True:
+            if AMZ_PRODUCTION:
+                params = {
+                    "MarketplaceIds": MARKETPLACE_ID,
+                    "CreatedAfter":   created_after,
+                }
+            else:
+                params = {
+                    "MarketplaceIds": "ATVPDKIKX0DER",
+                    "CreatedAfter":   "TEST_CASE_200"
+                }
+
+            if next_token:
+                params["NextToken"] = next_token
+
+            r = requests.get(
+                f"{AMAZON_API_BASE}/orders/v0/orders",
+                headers={"x-amz-access-token": token, "Content-Type": "application/json"},
+                params=params,
+                auth=aws_auth,
+                timeout=REQUEST_TIMEOUT
+            )
+            r.raise_for_status()
+            payload    = r.json().get("payload", {})
+            orders     = payload.get("Orders", [])
+            next_token = payload.get("NextToken")
+
+            all_orders.extend(orders)
+            print(f"📦 Fetched {len(orders)} orders | Total so far: {len(all_orders)}", flush=True)
+
+            if not next_token:
+                break
+
+        print(f"✅ Total orders to sync: {len(all_orders)}", flush=True)
+
+        for order in all_orders:
+            order_id     = order.get("AmazonOrderId", "")
+            order_status = order.get("OrderStatus", "")
+            order_date   = order.get("PurchaseDate", "")[:10]
+            pay          = map_payment(order_status)
+            ship         = map_shipping(order_status)
+
+            print(f"📦 Processing {order_id} | {order_status}", flush=True)
+
+            customer_id = get_or_create_customer(order)
+
+            try:
+                items = get_amazon_order_items(token, order_id)
+            except Exception as e:
+                print(f"❌ Items fetch failed for {order_id}: {e}", flush=True)
+                continue
+
+            for item in items:
+                product = item.get("Title", "")
+                sku     = item.get("SellerSKU", "")
+                qty     = int(item.get("QuantityOrdered", 1))
+                price   = float(item.get("ItemPrice", {}).get("Amount", 0))
+
+                # Build full fields
+                fields = {
+                    "Order ID":            order_id,
+                    "Order Number":        order_id,
+                    "Amazon Product Name": product,
+                    "Order Date":          order_date,
+                    "Qty":                 qty,
+                    "Rate":                price,
+                    "Sales Channel":       "Amazon",
+                    "Payment Status":      pay,
+                    "Shipping Status":     ship,
+                }
+                if customer_id:
+                    fields["Customer"] = [customer_id]
+
+                # Check if exists → update all fields, else create
+                existing_id = get_existing_line(order_id, product)
+
+                if existing_id:
+                    airtable_update(ORDER_LINE_ITEMS_TABLE_ID, existing_id, fields)
+                    print(f"🔄 Updated {order_id} → {product}", flush=True)
+                else:
+                    airtable_create(ORDER_LINE_ITEMS_TABLE_ID, fields)
+                    print(f"✅ Created {order_id} → {product}", flush=True)
+
+    except Exception as e:
+        print("❌ Sync all error:", e, flush=True)
+
+    finally:
+        amazon_lock.release()
+        print("🎉 SYNC ALL finished", flush=True)
+
+
+@app.route("/sync-all", methods=["GET"])
+def sync_all():
+    print("🔥 /sync-all HIT", flush=True)
+    thread = threading.Thread(target=sync_all_orders_job)
+    thread.daemon = True
+    thread.start()
+    return jsonify({
+        "status": "Full sync started — last 30 days",
+        "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
+    }), 200
+
 # ======================================================
 # ROUTES
 # ======================================================
