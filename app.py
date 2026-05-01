@@ -584,6 +584,56 @@ def test_airtable_direct():
         "token_used": token[:15] + "..."
     })
 
+# oAuth callback
+@app.route("/callback")
+def callback():
+    """Amazon OAuth callback — exchanges spapi_oauth_code for a refresh token."""
+    code  = request.args.get("spapi_oauth_code")
+    state = request.args.get("state", "")
+
+    if not code:
+        return jsonify({"error": "No code received", "args": dict(request.args)}), 400
+
+    print(f"📥 OAuth code received: {code[:20]}...", flush=True)
+
+    # Exchange the code for a refresh token
+    r = requests.post(
+        "https://api.amazon.com/auth/o2/token",
+        data={
+            "grant_type":    "authorization_code",
+            "code":          code,
+            "client_id":     AMZ_CLIENT_ID,
+            "client_secret": AMZ_CLIENT_SECRET,
+        },
+        timeout=REQUEST_TIMEOUT
+    )
+
+    print(f"🟡 Token exchange status: {r.status_code}", flush=True)
+    print(f"🟡 Token exchange response: {r.text}", flush=True)
+
+    if r.status_code != 200:
+        return jsonify({"error": "Token exchange failed", "detail": r.json()}), 400
+
+    data          = r.json()
+    refresh_token = data.get("refresh_token", "")
+    access_token  = data.get("access_token", "")
+
+    print(f"✅ Refresh token received: {refresh_token[:30]}...", flush=True)
+
+    # Show it clearly on screen so you can copy it
+    return f"""
+    <html><body style="font-family:monospace;padding:40px;background:#f5f5f5">
+    <h2 style="color:green">✅ Authorization successful!</h2>
+    <p><b>Copy your Refresh Token and save it in Render environment variables as AMZ_REFRESH_TOKEN:</b></p>
+    <div style="background:#fff;border:1px solid #ccc;padding:20px;word-break:break-all;border-radius:8px;margin:20px 0">
+        {refresh_token}
+    </div>
+    <p style="color:#666">Once saved in Render, set AMZ_PRODUCTION=true and redeploy.</p>
+    <p><small>Access token (not needed): {access_token[:30]}...</small></p>
+    </body></html>
+    """, 200
+
+
 # ======================================================
 # RUN
 # ======================================================
