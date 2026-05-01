@@ -190,25 +190,34 @@ def map_payment(status):
     return "Pending"
 
 def get_or_create_customer(order):
-    # Try buyer info first
     buyer_info  = order.get("BuyerInfo", {})
     buyer_email = buyer_info.get("BuyerEmail", "").strip()
     buyer_name  = buyer_info.get("BuyerName", "").strip()
 
-    # Fall back to shipping address name (no PII needed)
+    # Get name from shipping address if buyer name not available
     if not buyer_name:
-        shipping = order.get("ShippingAddress", {})
-        buyer_name = shipping.get("Name", "Amazon Customer").strip()
+        shipping   = order.get("ShippingAddress", {})
+        buyer_name = shipping.get("Name", "").strip()
+        print(f"📦 Shipping address name: {buyer_name}", flush=True)
 
-    # Use email if available, otherwise use order ID
+    if not buyer_name:
+        buyer_name = "Amazon Customer"
+
     buyer_id = buyer_email if buyer_email else order.get("AmazonOrderId", "")
 
     print(f"👤 Customer lookup | name={buyer_name} id={buyer_id}", flush=True)
 
     records = airtable_search(CUSTOMERS_TABLE_ID, f"{{Amazon Id}}='{buyer_id}'")
     if records:
-        print("👤 Existing customer found", flush=True)
-        return records[0]["id"]
+        existing = records[0]
+        existing_name = existing["fields"].get("Name", "")
+        # Update name if it's still the generic placeholder
+        if "Amazon Customer" in existing_name and buyer_name != "Amazon Customer":
+            airtable_update(CUSTOMERS_TABLE_ID, existing["id"], {"Name": buyer_name})
+            print(f"👤 Updated customer name to: {buyer_name}", flush=True)
+        else:
+            print("👤 Existing customer found", flush=True)
+        return existing["id"]
 
     print("👤 Creating new customer...", flush=True)
     result = airtable_create(CUSTOMERS_TABLE_ID, {
