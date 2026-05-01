@@ -190,16 +190,20 @@ def map_payment(status):
     return "Pending"
 
 def get_or_create_customer(order):
-    buyer_info = order.get("BuyerInfo", {})
-    buyer_id   = buyer_info.get("BuyerEmail", "").strip()
-    buyer_name = buyer_info.get("BuyerName", "Amazon Customer").strip()
+    # Try buyer info first
+    buyer_info  = order.get("BuyerInfo", {})
+    buyer_email = buyer_info.get("BuyerEmail", "").strip()
+    buyer_name  = buyer_info.get("BuyerName", "").strip()
 
-    # Sandbox orders have no BuyerInfo — use order ID as fallback
-    if not buyer_id:
-        buyer_id   = order.get("AmazonOrderId", "")
-        buyer_name = "Amazon Customer (Sandbox)"
+    # Fall back to shipping address name (no PII needed)
+    if not buyer_name:
+        shipping = order.get("ShippingAddress", {})
+        buyer_name = shipping.get("Name", "Amazon Customer").strip()
 
-    print(f"👤 Customer lookup | id={buyer_id}", flush=True)
+    # Use email if available, otherwise use order ID
+    buyer_id = buyer_email if buyer_email else order.get("AmazonOrderId", "")
+
+    print(f"👤 Customer lookup | name={buyer_name} id={buyer_id}", flush=True)
 
     records = airtable_search(CUSTOMERS_TABLE_ID, f"{{Amazon Id}}='{buyer_id}'")
     if records:
