@@ -183,7 +183,7 @@ def get_rdt_token(access_token, order_id):
                 {
                     "method": "GET",
                     "path": f"/orders/v0/orders/{order_id}",
-                    "dataElements": ["buyerInfo", "shippingAddress"]
+                    "dataElements": ["buyerInfo"]
                 }
             ]
         },
