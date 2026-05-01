@@ -212,7 +212,12 @@ def get_order_with_pii(access_token, order_id):
     )
     print(f"🟡 PII order status: {r.status_code}", flush=True)
     if r.status_code == 200:
-        return r.json().get("payload", {})
+        payload = r.json().get("payload", {})
+        print(f"🔍 PII payload keys: {list(payload.keys())}", flush=True)
+        print(f"🔍 BuyerInfo: {payload.get('BuyerInfo', {})}", flush=True)
+        print(f"🔍 ShippingAddress: {payload.get('ShippingAddress', {})}", flush=True)
+        return payload
+    
     print(f"⚠️ PII order failed: {r.text[:200]}", flush=True)
     return {}
 
