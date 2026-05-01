@@ -3,9 +3,9 @@ import csv
 import io
 import requests
 import threading
-from flask import Response  # add Response here
+from flask import Response
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, request,Response  # add Response here
+from flask import Flask, jsonify, request
 from requests_aws4auth import AWS4Auth
 
 requests.adapters.DEFAULT_RETRIES = 3
@@ -37,11 +37,6 @@ AMAZON_API_BASE = (
     "https://sandbox.sellingpartnerapi-eu.amazon.com"
 )
 
-# AIRTABLE_HEADERS = {
-#     "Authorization": f"Bearer {AIRTABLE_TOKEN}",
-#     "Content-Type":  "application/json"
-# }
-# REPLACE with a function
 def get_airtable_headers():
     return {
         "Authorization": f"Bearer {os.getenv('AIRTABLE_TOKEN')}",
@@ -69,7 +64,7 @@ print("AWS_ACCESS_KEY:",    bool(AWS_ACCESS_KEY), flush=True)
 def airtable_search(table_id, formula):
     r = requests.get(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}",
-        headers=get_airtable_headers(),   # ← changed
+        headers=get_airtable_headers(),
         params={"filterByFormula": formula},
         timeout=REQUEST_TIMEOUT
     )
@@ -81,7 +76,7 @@ def airtable_search(table_id, formula):
 def airtable_create(table_id, fields):
     r = requests.post(
         f"{AIRTABLE_URL}/{BASE_ID}/{table_id}",
-        headers=get_airtable_headers(),   # ← changed
+        headers=get_airtable_headers(),
         json={"fields": fields},
         timeout=REQUEST_TIMEOUT
     )
@@ -152,8 +147,6 @@ def get_amazon_orders(token):
     print(f"✅ Amazon orders fetched: {len(orders)}", flush=True)
     return orders
 
-
-
 def get_amazon_order_items(token, order_id):
     if not AMZ_PRODUCTION:
         print("🧪 Sandbox — using dummy item", flush=True)
@@ -176,11 +169,58 @@ def get_amazon_order_items(token, order_id):
     print(f"✅ Items found: {len(items)}", flush=True)
     return items
 
+def get_rdt_token(access_token, order_id):
+    """Get a Restricted Data Token to access PII (buyer name, shipping address)"""
+    print(f"🔐 Getting RDT for {order_id}", flush=True)
+    r = requests.post(
+        f"{AMAZON_API_BASE}/tokens/2021-03-01/restrictedDataToken",
+        headers={
+            "x-amz-access-token": access_token,
+            "Content-Type": "application/json"
+        },
+        json={
+            "restrictedResources": [
+                {
+                    "method": "GET",
+                    "path": f"/orders/v0/orders/{order_id}",
+                    "dataElements": ["buyerInfo", "shippingAddress"]
+                }
+            ]
+        },
+        auth=aws_auth,
+        timeout=REQUEST_TIMEOUT
+    )
+    print(f"🟡 RDT status: {r.status_code}", flush=True)
+    if r.status_code == 200:
+        return r.json().get("restrictedDataToken")
+    print(f"⚠️ RDT failed: {r.text[:200]}", flush=True)
+    return None
+
+def get_order_with_pii(access_token, order_id):
+    """Fetch a single order using RDT to get buyer name and shipping address"""
+    rdt = get_rdt_token(access_token, order_id)
+    if not rdt:
+        return {}
+    r = requests.get(
+        f"{AMAZON_API_BASE}/orders/v0/orders/{order_id}",
+        headers={
+            "x-amz-access-token": rdt,
+            "Content-Type": "application/json"
+        },
+        auth=aws_auth,
+        timeout=REQUEST_TIMEOUT
+    )
+    print(f"🟡 PII order status: {r.status_code}", flush=True)
+    if r.status_code == 200:
+        return r.json().get("payload", {})
+    print(f"⚠️ PII order failed: {r.text[:200]}", flush=True)
+    return {}
+
 def map_shipping(status):
     s = status.lower()
-    if s == "shipped":               return "Shipped"
-    if s == "delivered":             return "Delivered"
-    if s in ["unshipped", "pending"]:return "New"
+    if s == "shipped":                return "Shipped"
+    if s == "delivered":              return "Delivered"
+    if s in ["unshipped", "pending"]: return "New"
     return "New"
 
 def map_payment(status):
@@ -189,29 +229,38 @@ def map_payment(status):
     if s == "canceled":               return "Failed"
     return "Pending"
 
-def get_or_create_customer(order):
-    buyer_info  = order.get("BuyerInfo", {})
-    buyer_email = buyer_info.get("BuyerEmail", "").strip()
-    buyer_name  = buyer_info.get("BuyerName", "").strip()
+def get_or_create_customer(order, access_token=None):
+    order_id    = order.get("AmazonOrderId", "")
+    buyer_name  = ""
+    buyer_email = ""
 
-    # Get name from shipping address if buyer name not available
-    if not buyer_name:
-        shipping   = order.get("ShippingAddress", {})
-        buyer_name = shipping.get("Name", "").strip()
-        print(f"📦 Shipping address name: {buyer_name}", flush=True)
+    # Try to get PII data via RDT in production
+    if AMZ_PRODUCTION and access_token:
+        pii_order   = get_order_with_pii(access_token, order_id)
+        buyer_info  = pii_order.get("BuyerInfo", {})
+        buyer_email = buyer_info.get("BuyerEmail", "").strip()
+        buyer_name  = buyer_info.get("BuyerName", "").strip()
+        if not buyer_name:
+            shipping   = pii_order.get("ShippingAddress", {})
+            buyer_name = shipping.get("Name", "").strip()
+            print(f"📦 Shipping name: {buyer_name}", flush=True)
+    else:
+        # Sandbox fallback
+        buyer_info  = order.get("BuyerInfo", {})
+        buyer_email = buyer_info.get("BuyerEmail", "").strip()
+        buyer_name  = buyer_info.get("BuyerName", "").strip()
 
     if not buyer_name:
         buyer_name = "Amazon Customer"
 
-    buyer_id = buyer_email if buyer_email else order.get("AmazonOrderId", "")
+    buyer_id = buyer_email if buyer_email else order_id
 
     print(f"👤 Customer lookup | name={buyer_name} id={buyer_id}", flush=True)
 
     records = airtable_search(CUSTOMERS_TABLE_ID, f"{{Amazon Id}}='{buyer_id}'")
     if records:
-        existing = records[0]
+        existing      = records[0]
         existing_name = existing["fields"].get("Name", "")
-        # Update name if it's still the generic placeholder
         if "Amazon Customer" in existing_name and buyer_name != "Amazon Customer":
             airtable_update(CUSTOMERS_TABLE_ID, existing["id"], {"Name": buyer_name})
             print(f"👤 Updated customer name to: {buyer_name}", flush=True)
@@ -234,7 +283,7 @@ def get_existing_line(order_id, product_name):
     return records[0]["id"] if records else None
 
 # ======================================================
-# MAIN SYNC JOB
+# MAIN SYNC JOB — last 2 days (called by /ping)
 # ======================================================
 def sync_amazon_orders_job():
     if not amazon_lock.acquire(blocking=False):
@@ -256,7 +305,7 @@ def sync_amazon_orders_job():
 
             print(f"📦 Processing {order_id} | {order_status}", flush=True)
 
-            customer_id = get_or_create_customer(order)
+            customer_id = get_or_create_customer(order, token)
 
             try:
                 items = get_amazon_order_items(token, order_id)
@@ -278,18 +327,20 @@ def sync_amazon_orders_job():
                     })
                     print(f"🔄 Updated {order_id} → {product}", flush=True)
                 else:
-                    airtable_create(ORDER_LINE_ITEMS_TABLE_ID, {
+                    fields = {
                         "Order ID":            order_id,
                         "Order Number":        order_id,
                         "Amazon Product Name": product,
-                        "Customer":            [customer_id],
                         "Order Date":          order_date,
                         "Qty":                 qty,
                         "Rate":                price,
                         "Sales Channel":       "Amazon",
                         "Payment Status":      pay,
                         "Shipping Status":     ship,
-                    })
+                    }
+                    if customer_id:
+                        fields["Customer"] = [customer_id]
+                    airtable_create(ORDER_LINE_ITEMS_TABLE_ID, fields)
                     print(f"✅ Created {order_id} → {product}", flush=True)
 
     except Exception as e:
@@ -299,9 +350,8 @@ def sync_amazon_orders_job():
         amazon_lock.release()
         print("🎉 Amazon sync finished", flush=True)
 
-
-        # ======================================================
-# SYNC ALL — Last 30 days, full update
+# ======================================================
+# SYNC ALL — last 30 days (called by /sync-all)
 # ======================================================
 def sync_all_orders_job():
     if not amazon_lock.acquire(blocking=False):
@@ -313,10 +363,9 @@ def sync_all_orders_job():
     try:
         token = get_amazon_token()
 
-        # Fetch all orders from last 30 days with pagination
-        all_orders = []
+        all_orders    = []
         created_after = (datetime.utcnow() - timedelta(days=30)).isoformat()
-        next_token = None
+        next_token    = None
 
         while True:
             if AMZ_PRODUCTION:
@@ -362,7 +411,7 @@ def sync_all_orders_job():
 
             print(f"📦 Processing {order_id} | {order_status}", flush=True)
 
-            customer_id = get_or_create_customer(order)
+            customer_id = get_or_create_customer(order, token)
 
             try:
                 items = get_amazon_order_items(token, order_id)
@@ -376,7 +425,6 @@ def sync_all_orders_job():
                 qty     = int(item.get("QuantityOrdered", 1))
                 price   = float(item.get("ItemPrice", {}).get("Amount", 0))
 
-                # Build full fields
                 fields = {
                     "Order ID":            order_id,
                     "Order Number":        order_id,
@@ -391,7 +439,6 @@ def sync_all_orders_job():
                 if customer_id:
                     fields["Customer"] = [customer_id]
 
-                # Check if exists → update all fields, else create
                 existing_id = get_existing_line(order_id, product)
 
                 if existing_id:
@@ -408,9 +455,6 @@ def sync_all_orders_job():
         amazon_lock.release()
         print("🎉 SYNC ALL finished", flush=True)
 
-
-
-
 # ======================================================
 # ROUTES
 # ======================================================
@@ -425,9 +469,6 @@ def wake():
 @app.route("/ping", methods=["GET"])
 def ping():
     print("🔥 /ping HIT", flush=True)
-    # Comment out auth temporarily for testing
-    # if request.headers.get("X-Update-Secret") != os.getenv("UPDATE_SECRET"):
-    #     return jsonify({"error": "Unauthorized"}), 401
     thread = threading.Thread(target=sync_amazon_orders_job)
     thread.daemon = True
     thread.start()
@@ -447,6 +488,39 @@ def sync_all():
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
     }), 200
 
+@app.route("/callback")
+def callback():
+    """Amazon OAuth callback — exchanges spapi_oauth_code for a refresh token."""
+    code = request.args.get("spapi_oauth_code")
+    if not code:
+        return jsonify({"error": "No code received", "args": dict(request.args)}), 400
+    print(f"📥 OAuth code received: {code[:20]}...", flush=True)
+    r = requests.post(
+        "https://api.amazon.com/auth/o2/token",
+        data={
+            "grant_type":    "authorization_code",
+            "code":          code,
+            "client_id":     AMZ_CLIENT_ID,
+            "client_secret": AMZ_CLIENT_SECRET,
+        },
+        timeout=REQUEST_TIMEOUT
+    )
+    print(f"🟡 Token exchange status: {r.status_code}", flush=True)
+    if r.status_code != 200:
+        return jsonify({"error": "Token exchange failed", "detail": r.json()}), 400
+    refresh_token = r.json().get("refresh_token", "")
+    print(f"✅ Refresh token received: {refresh_token[:30]}...", flush=True)
+    return f"""
+    <html><body style="font-family:monospace;padding:40px;background:#f0fff0">
+    <h2 style="color:green">✅ Authorization successful!</h2>
+    <p><b>Copy your Refresh Token and save it in Render as AMZ_REFRESH_TOKEN:</b></p>
+    <div style="background:#fff;border:2px solid green;padding:20px;
+                word-break:break-all;border-radius:8px;margin:20px 0">
+        {refresh_token}
+    </div>
+    <p>Then set AMZ_PRODUCTION=true and redeploy.</p>
+    </body></html>
+    """, 200
 
 @app.route("/download-orders", methods=["GET"])
 def download_orders():
@@ -454,7 +528,6 @@ def download_orders():
     try:
         token = get_amazon_token()
 
-        # Fetch all orders
         all_orders = []
         if AMZ_PRODUCTION:
             params = {
@@ -488,40 +561,27 @@ def download_orders():
 
         print(f"✅ Total orders: {len(all_orders)}", flush=True)
 
-        # Build CSV
         output = io.StringIO()
         writer = csv.writer(output)
-
-        # Header row
         writer.writerow([
-            "Order ID",
-            "Order Status",
-            "Purchase Date",
-            "Buyer Name",
-            "Buyer Email",
-            "Sales Channel",
-            "Order Total",
-            "Currency",
-            "Fulfillment Channel",
-            "Ship Service Level",
-            "Product Name",
-            "SKU",
-            "Quantity",
-            "Item Price",
+            "Order ID", "Order Status", "Purchase Date",
+            "Buyer Name", "Buyer Email", "Sales Channel",
+            "Order Total", "Currency", "Fulfillment Channel",
+            "Ship Service Level", "Product Name", "SKU",
+            "Quantity", "Item Price",
         ])
 
-        # Data rows
         for order in all_orders:
-            order_id     = order.get("AmazonOrderId", "")
-            order_status = order.get("OrderStatus", "")
-            purchase_date= order.get("PurchaseDate", "")[:10]
-            buyer_name   = order.get("BuyerInfo", {}).get("BuyerName", "")
-            buyer_email  = order.get("BuyerInfo", {}).get("BuyerEmail", "")
-            sales_channel= order.get("SalesChannel", "")
-            order_total  = order.get("OrderTotal", {}).get("Amount", "")
-            currency     = order.get("OrderTotal", {}).get("CurrencyCode", "")
-            fulfillment  = order.get("FulfillmentChannel", "")
-            ship_level   = order.get("ShipServiceLevel", "")
+            order_id      = order.get("AmazonOrderId", "")
+            order_status  = order.get("OrderStatus", "")
+            purchase_date = order.get("PurchaseDate", "")[:10]
+            buyer_name    = order.get("BuyerInfo", {}).get("BuyerName", "")
+            buyer_email   = order.get("BuyerInfo", {}).get("BuyerEmail", "")
+            sales_channel = order.get("SalesChannel", "")
+            order_total   = order.get("OrderTotal", {}).get("Amount", "")
+            currency      = order.get("OrderTotal", {}).get("CurrencyCode", "")
+            fulfillment   = order.get("FulfillmentChannel", "")
+            ship_level    = order.get("ShipServiceLevel", "")
 
             try:
                 items = get_amazon_order_items(token, order_id)
@@ -531,23 +591,15 @@ def download_orders():
             if items:
                 for item in items:
                     writer.writerow([
-                        order_id,
-                        order_status,
-                        purchase_date,
-                        buyer_name,
-                        buyer_email,
-                        sales_channel,
-                        order_total,
-                        currency,
-                        fulfillment,
-                        ship_level,
+                        order_id, order_status, purchase_date,
+                        buyer_name, buyer_email, sales_channel,
+                        order_total, currency, fulfillment, ship_level,
                         item.get("Title", ""),
                         item.get("SellerSKU", ""),
                         item.get("QuantityOrdered", ""),
                         item.get("ItemPrice", {}).get("Amount", ""),
                     ])
             else:
-                # Order with no items
                 writer.writerow([
                     order_id, order_status, purchase_date,
                     buyer_name, buyer_email, sales_channel,
@@ -555,7 +607,6 @@ def download_orders():
                     "", "", "", ""
                 ])
 
-        # Return as downloadable CSV
         output.seek(0)
         filename = f"amazon_orders_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
         return Response(
@@ -567,17 +618,17 @@ def download_orders():
     except Exception as e:
         print("❌ Download error:", e, flush=True)
         return jsonify({"error": str(e)}), 500
-    
+
 @app.route("/debug")
 def debug():
     token = AIRTABLE_TOKEN or ""
     return jsonify({
-        "token_length": len(token),
-        "token_start": token[:10] if token else "EMPTY",
+        "token_length":          len(token),
+        "token_start":           token[:10] if token else "EMPTY",
         "token_starts_with_pat": token.startswith("pat"),
-        "base_id": BASE_ID,
-        "customers_table": CUSTOMERS_TABLE_ID,
-        "order_line_items_table": ORDER_LINE_ITEMS_TABLE_ID,
+        "base_id":               BASE_ID,
+        "customers_table":       CUSTOMERS_TABLE_ID,
+        "order_line_items_table":ORDER_LINE_ITEMS_TABLE_ID,
     })
 
 @app.route("/test-airtable-direct")
@@ -592,12 +643,10 @@ def test_airtable_direct():
         params={"maxRecords": 1}
     )
     return jsonify({
-        "status": r.status_code,
-        "response": r.json(),
+        "status":     r.status_code,
+        "response":   r.json(),
         "token_used": token[:15] + "..."
     })
-
-
 
 # ======================================================
 # RUN
