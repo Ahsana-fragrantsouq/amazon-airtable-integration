@@ -370,7 +370,9 @@ def sync_all_orders_job():
         token = get_amazon_token()
 
         all_orders    = []
-        created_after = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        # Change the days value to adjust how far back to sync:
+        # 30 = 1 month, 60 = 2 months, 90 = 3 months, 180 = 6 months
+        created_after = (datetime.utcnow() - timedelta(days=60)).isoformat()
         next_token    = None
 
         while True:
