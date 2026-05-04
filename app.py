@@ -445,7 +445,7 @@ def sync_all_orders_job():
                 if customer_id:
                     fields["Customer"] = [customer_id]
 
-                existing_id = get_existing_line(order_id, product)
+                existing_id = get_existing_line(order_id)
 
                 if existing_id:
                     airtable_update(ORDER_LINE_ITEMS_TABLE_ID, existing_id, fields)
