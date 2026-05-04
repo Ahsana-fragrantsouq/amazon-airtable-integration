@@ -477,6 +477,11 @@ def wake():
 @app.route("/ping", methods=["GET"])
 def ping():
     print("🔥 /ping HIT", flush=True)
+    received_secret = request.headers.get("X-Update-Secret")
+    expected_secret = os.getenv("UPDATE_SECRET")
+    if received_secret != expected_secret:
+        print("⛔ Unauthorized", flush=True)
+        return jsonify({"error": "Unauthorized"}), 401
     thread = threading.Thread(target=sync_amazon_orders_job)
     thread.daemon = True
     thread.start()
