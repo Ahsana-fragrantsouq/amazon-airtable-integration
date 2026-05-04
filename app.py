@@ -281,10 +281,10 @@ def get_or_create_customer(order, access_token=None):
     })
     return result["id"]
 
-def get_existing_line(order_id, product_name):
+def get_existing_line(order_id):
     records = airtable_search(
         ORDER_LINE_ITEMS_TABLE_ID,
-        f"AND({{Order ID}}='{order_id}', {{Amazon Product Name}}='{product_name}')"
+        f"{{Order ID}}='{order_id}'"
     )
     return records[0]["id"] if records else None
 
