@@ -239,18 +239,20 @@ def get_or_create_customer(order, access_token=None):
     buyer_name  = ""
     buyer_email = ""
 
-    # Try to get PII data via RDT in production
     if AMZ_PRODUCTION and access_token:
         pii_order   = get_order_with_pii(access_token, order_id)
         buyer_info  = pii_order.get("BuyerInfo", {})
         buyer_email = buyer_info.get("BuyerEmail", "").strip()
         buyer_name  = buyer_info.get("BuyerName", "").strip()
+
         if not buyer_name:
-            shipping   = pii_order.get("ShippingAddress", {})
-            buyer_name = shipping.get("Name", "").strip()
-            print(f"📦 Shipping name: {buyer_name}", flush=True)
+            shipping = pii_order.get("ShippingAddress", {})
+            city     = shipping.get("City", "")
+            country  = shipping.get("CountryCode", "")
+            if city or country:
+                buyer_name = f"Amazon Customer - {city}, {country}".strip(", ")
+                print(f"📦 Using city/country: {buyer_name}", flush=True)
     else:
-        # Sandbox fallback
         buyer_info  = order.get("BuyerInfo", {})
         buyer_email = buyer_info.get("BuyerEmail", "").strip()
         buyer_name  = buyer_info.get("BuyerName", "").strip()
@@ -259,21 +261,20 @@ def get_or_create_customer(order, access_token=None):
         buyer_name = "Amazon Customer"
 
     buyer_id = buyer_email if buyer_email else order_id
-
     print(f"👤 Customer lookup | name={buyer_name} id={buyer_id}", flush=True)
 
     records = airtable_search(CUSTOMERS_TABLE_ID, f"{{Amazon Id}}='{buyer_id}'")
     if records:
         existing      = records[0]
         existing_name = existing["fields"].get("Name", "")
-        if "Amazon Customer" in existing_name and buyer_name != "Amazon Customer":
+        if "Amazon Customer" in existing_name and buyer_name not in ("Amazon Customer", existing_name):
             airtable_update(CUSTOMERS_TABLE_ID, existing["id"], {"Name": buyer_name})
             print(f"👤 Updated customer name to: {buyer_name}", flush=True)
         else:
-            print("👤 Existing customer found", flush=True)
+            print(f"👤 Existing customer: {existing_name}", flush=True)
         return existing["id"]
 
-    print("👤 Creating new customer...", flush=True)
+    print(f"👤 Creating new customer: {buyer_name}", flush=True)
     result = airtable_create(CUSTOMERS_TABLE_ID, {
         "Name":      buyer_name,
         "Amazon Id": buyer_id
@@ -323,7 +324,7 @@ def sync_amazon_orders_job():
                 qty     = int(item.get("QuantityOrdered", 1))
                 price   = float(item.get("ItemPrice", {}).get("Amount", 0))
 
-                existing_id = get_existing_line(order_id, product)
+                existing_id = get_existing_line(order_id)
 
                 if existing_id:
                     airtable_update(ORDER_LINE_ITEMS_TABLE_ID, existing_id, {
