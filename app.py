@@ -497,7 +497,7 @@ def sync_all():
     thread.daemon = True
     thread.start()
     return jsonify({
-        "status": "Full sync started — last 30 days",
+        "status": "Full sync started — last 60 days",
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
     }), 200
 
@@ -660,6 +660,21 @@ def test_airtable_direct():
         "response":   r.json(),
         "token_used": token[:15] + "..."
     })
+
+    @app.route("/webhook", methods=["POST"])
+    def webhook():
+         print("🔔 Webhook received!", flush=True)
+    
+    # Verify it's from Amazon (optional security)
+    data = request.json
+    print(f"📦 Webhook data: {str(data)[:200]}", flush=True)
+    
+    # Trigger sync immediately
+    thread = threading.Thread(target=sync_amazon_orders_job)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({"status": "received"}), 200
 
 # ======================================================
 # RUN
