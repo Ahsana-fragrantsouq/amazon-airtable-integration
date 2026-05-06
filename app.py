@@ -295,10 +295,16 @@ def get_or_create_customer(order, access_token=None):
 
     # Step 3: Create new customer
     print(f"👤 Creating new customer: {buyer_name}", flush=True)
-    result = airtable_create(CUSTOMERS_TABLE_ID, {
-        "Name":      buyer_name,
-        "Amazon Id": amazon_id
-    })
+    fields = {
+        "Customer Name":          buyer_name,
+        "Amazon Id":              amazon_id,
+        "Acquired sales channel": "Amazon",
+    }
+    if buyer_email:
+        fields["Mail id"] = buyer_email
+    if buyer_phone:
+        fields["Contact Number"] = buyer_phone
+    result = airtable_create(CUSTOMERS_TABLE_ID, fields)
     return result["id"]
 
 # ======================================================
