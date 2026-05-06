@@ -1,5 +1,5 @@
 flask
 requests
-python-dotenv
 requests-aws4auth
-gunicorn
+python-dotenv
+gunicorn==25.3.0
