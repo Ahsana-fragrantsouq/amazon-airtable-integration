@@ -3,6 +3,7 @@ import csv
 import io
 import requests
 import threading
+import time    # for uptimerobot
 from flask import Response
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
@@ -47,6 +48,8 @@ def get_airtable_headers():
 
 aws_auth    = AWS4Auth(AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, "execute-api")
 amazon_lock = threading.Lock()
+last_sync_time = 0
+MIN_SYNC_INTERVAL = 300  # minimum 5 minutes between syncs
 
 # ======================================================
 # STARTUP LOG
@@ -703,6 +706,24 @@ def test_airtable_direct():
         "token_used": token[:15] + "..."
     })
 
+# uptimerobot
+@app.route("/auto-sync", methods=["GET"])
+def auto_sync():
+    global last_sync_time
+    now = time.time()
+    if now - last_sync_time < MIN_SYNC_INTERVAL:
+        remaining = int(MIN_SYNC_INTERVAL - (now - last_sync_time))
+        print(f"⏳ Auto-sync skipped — wait {remaining}s", flush=True)
+        return jsonify({"status": "skipped", "next_sync_in": remaining}), 200
+    last_sync_time = now
+    print("🔔 Auto-sync triggered by UptimeRobot", flush=True)
+    thread = threading.Thread(target=sync_amazon_orders_job)
+    thread.daemon = True
+    thread.start()
+    return jsonify({
+        "status": "Sync started",
+        "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
+    }), 200
 # ======================================================
 # RUN
 # ======================================================
