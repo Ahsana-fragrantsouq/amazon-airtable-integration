@@ -272,6 +272,12 @@ def get_or_create_customer(order, access_token=None):
     amazon_id = buyer_email if buyer_email else order_id
     print(f"👤 Amazon Id: {amazon_id} | name: {buyer_name}", flush=True)
 
+    # Step 0: Search by Amazon Id first (prevents duplicates)
+    records = airtable_search(CUSTOMERS_TABLE_ID, f"{{Amazon Id}}='{amazon_id}'")
+    if records:
+     print(f"👤 Found by Amazon Id", flush=True)
+     return records[0]["id"]
+
     # Step 1: Search Airtable by email (Mail id)
     if buyer_email:
         records = airtable_search(
@@ -395,6 +401,8 @@ def process_order(order, token):
     ship         = map_shipping(order_status)
 
     print(f"\n📦 Processing {order_id} | {order_status}", flush=True)
+
+    
 
     # Step 1: Get or create customer (search by email/phone)
     customer_id = get_or_create_customer(order, token)
