@@ -376,7 +376,7 @@ def build_line_fields(order_id, product_title, order_date, qty, price,
     if customer_id:
         fields["Customer"] = [customer_id]
     if orders_record_id:
-        fields["Orders"] = [orders_record_id]
+        fields["Order"] = [orders_record_id]
     if product_record_id:
         fields["Product"] = [product_record_id]
     return fields
