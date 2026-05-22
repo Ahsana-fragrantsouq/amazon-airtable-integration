@@ -518,7 +518,7 @@ def backfill_ship_by_job():
     try:
         token         = get_amazon_token()
         all_orders    = []
-        created_after = (datetime.utcnow() - timedelta(days=180)).isoformat()
+        created_after = (datetime.utcnow() - timedelta(days=500)).isoformat()
         next_token    = None
 
         while True:
@@ -613,7 +613,7 @@ def backfill_ship_by():
     thread.daemon = True
     thread.start()
     return jsonify({
-        "status":  "Backfill started — last 180 days",
+        "status":  "Backfill started — last 500 days",
         "message": "Watch Render logs for progress"
     }), 200
 
