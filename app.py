@@ -734,43 +734,77 @@ def auto_sync():
     }), 200
 
 # ======================================================
-# SHOPIFY FULFILLMENT WEBHOOK — updates Ship By date
+# BACKFILL SHIP BY — for already synced Amazon orders
 # ======================================================
-@app.route("/shopify-fulfillment", methods=["POST"])
-def shopify_fulfillment():
-    print("🛍️ Shopify fulfillment webhook received", flush=True)
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data"}), 400
+def backfill_ship_by_job():
+    print("🔄 Starting Amazon Ship By backfill...", flush=True)
+    try:
+        token         = get_amazon_token()
+        all_orders    = []
+        created_after = (datetime.utcnow() - timedelta(days=180)).isoformat()
+        next_token    = None
 
-    order_id     = str(data.get("id", ""))
-    order_number = str(data.get("order_number", ""))
-    fulfillments = data.get("fulfillments", [])
+        # Fetch all orders from last 180 days
+        while True:
+            params = {"MarketplaceIds": MARKETPLACE_ID, "CreatedAfter": created_after}
+            if next_token:
+                params["NextToken"] = next_token
+            r = requests.get(
+                f"{AMAZON_API_BASE}/orders/v0/orders",
+                headers={"x-amz-access-token": token, "Content-Type": "application/json"},
+                params=params,
+                auth=aws_auth,
+                timeout=REQUEST_TIMEOUT
+            )
+            r.raise_for_status()
+            payload    = r.json().get("payload", {})
+            orders     = payload.get("Orders", [])
+            next_token = payload.get("NextToken")
+            all_orders.extend(orders)
+            print(f"📦 Fetched {len(orders)} | Total: {len(all_orders)}", flush=True)
+            if not next_token:
+                break
 
-    if not fulfillments:
-        print("⚠️ No fulfillments in payload", flush=True)
-        return jsonify({"status": "no fulfillments"}), 200
+        print(f"✅ Total orders to backfill: {len(all_orders)}", flush=True)
+        updated = 0
+        skipped = 0
 
-    # Get fulfillment date
-    fulfilled_at   = fulfillments[0].get("created_at", "")
-    fulfilled_date = fulfilled_at[:10] if fulfilled_at else datetime.utcnow().strftime("%Y-%m-%d")
-    print(f"🛍️ Order {order_id} | #{order_number} fulfilled at {fulfilled_date}", flush=True)
+        for order in all_orders:
+            order_id    = order.get("AmazonOrderId", "")
+            ship_by_raw = order.get("LatestShipDate", "") or order.get("EarliestShipDate", "")
+            ship_by     = ship_by_raw[:10] if ship_by_raw else None
 
-    # Search Orders table by Order ID then Order Number
-    records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_id}'")
-    if not records:
-        records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_number}'")
+            if not ship_by:
+                skipped += 1
+                continue
 
-    if records:
-        airtable_update(ORDERS_TABLE_ID, records[0]["id"], {
-            "Ship By": fulfilled_date
-        })
-        print(f"✅ Ship By updated to {fulfilled_date}", flush=True)
-    else:
-        print(f"⚠️ Order not found: {order_id} / #{order_number}", flush=True)
+            # Find existing order in Airtable Orders table
+            records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_id}'")
+            if records:
+                airtable_update(ORDERS_TABLE_ID, records[0]["id"], {
+                    "Ship By": ship_by
+                })
+                print(f"✅ {order_id} → Ship By: {ship_by}", flush=True)
+                updated += 1
+            else:
+                print(f"⚠️ Order not found in Airtable: {order_id}", flush=True)
+                skipped += 1
 
-    return jsonify({"status": "ok"}), 200
+        print(f"🎉 Backfill complete: {updated} updated, {skipped} skipped", flush=True)
 
+    except Exception as e:
+        print(f"❌ Backfill error: {e}", flush=True)
+
+    @app.route("/backfill-ship-by", methods=["GET"])
+    def backfill_ship_by():
+        print("🔥 /backfill-ship-by HIT", flush=True)
+        thread = threading.Thread(target=backfill_ship_by_job)
+        thread.daemon = True
+        thread.start()
+        return jsonify({
+        "status":  "Backfill started — last 180 days",
+        "message": "Watch Render logs for progress"
+    }), 200
 # ======================================================
 # RUN
 # ======================================================
