@@ -472,7 +472,6 @@ def sync_all_orders_job():
     try:
         token         = get_amazon_token()
         all_orders    = []
-        # Change days: 30=1mo, 60=2mo, 90=3mo, 180=6mo
         created_after = (datetime.utcnow() - timedelta(days=60)).isoformat()
         next_token    = None
 
@@ -512,6 +511,64 @@ def sync_all_orders_job():
         print("🎉 SYNC ALL finished", flush=True)
 
 # ======================================================
+# BACKFILL SHIP BY — background job
+# ======================================================
+def backfill_ship_by_job():
+    print("🔄 Starting Amazon Ship By backfill...", flush=True)
+    try:
+        token         = get_amazon_token()
+        all_orders    = []
+        created_after = (datetime.utcnow() - timedelta(days=180)).isoformat()
+        next_token    = None
+
+        while True:
+            params = {"MarketplaceIds": MARKETPLACE_ID, "CreatedAfter": created_after}
+            if next_token:
+                params["NextToken"] = next_token
+            r = requests.get(
+                f"{AMAZON_API_BASE}/orders/v0/orders",
+                headers={"x-amz-access-token": token, "Content-Type": "application/json"},
+                params=params,
+                auth=aws_auth,
+                timeout=REQUEST_TIMEOUT
+            )
+            r.raise_for_status()
+            payload    = r.json().get("payload", {})
+            orders     = payload.get("Orders", [])
+            next_token = payload.get("NextToken")
+            all_orders.extend(orders)
+            print(f"📦 Fetched {len(orders)} | Total: {len(all_orders)}", flush=True)
+            if not next_token:
+                break
+
+        print(f"✅ Total orders to backfill: {len(all_orders)}", flush=True)
+        updated = 0
+        skipped = 0
+
+        for order in all_orders:
+            order_id    = order.get("AmazonOrderId", "")
+            ship_by_raw = order.get("LatestShipDate", "") or order.get("EarliestShipDate", "")
+            ship_by     = ship_by_raw[:10] if ship_by_raw else None
+
+            if not ship_by:
+                skipped += 1
+                continue
+
+            records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_id}'")
+            if records:
+                airtable_update(ORDERS_TABLE_ID, records[0]["id"], {"Ship By": ship_by})
+                print(f"✅ {order_id} → Ship By: {ship_by}", flush=True)
+                updated += 1
+            else:
+                print(f"⚠️ Not found in Airtable: {order_id}", flush=True)
+                skipped += 1
+
+        print(f"🎉 Backfill complete: {updated} updated, {skipped} skipped", flush=True)
+
+    except Exception as e:
+        print(f"❌ Backfill error: {e}", flush=True)
+
+# ======================================================
 # ROUTES
 # ======================================================
 @app.route("/", methods=["GET", "HEAD"])
@@ -547,6 +604,17 @@ def sync_all():
     return jsonify({
         "status": "Full sync started — last 60 days",
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
+    }), 200
+
+@app.route("/backfill-ship-by", methods=["GET"])
+def backfill_ship_by():
+    print("🔥 /backfill-ship-by HIT", flush=True)
+    thread = threading.Thread(target=backfill_ship_by_job)
+    thread.daemon = True
+    thread.start()
+    return jsonify({
+        "status":  "Backfill started — last 180 days",
+        "message": "Watch Render logs for progress"
     }), 200
 
 @app.route("/callback")
@@ -712,9 +780,6 @@ def test_airtable_direct():
         "token_used": token[:15] + "..."
     })
 
-# ======================================================
-# AUTO-SYNC — UptimeRobot keep-alive + trigger
-# ======================================================
 @app.route("/auto-sync", methods=["GET"])
 def auto_sync():
     global last_sync_time
@@ -733,78 +798,37 @@ def auto_sync():
         "mode":   "PRODUCTION" if AMZ_PRODUCTION else "SANDBOX"
     }), 200
 
-# ======================================================
-# BACKFILL SHIP BY — for already synced Amazon orders
-# ======================================================
-def backfill_ship_by_job():
-    print("🔄 Starting Amazon Ship By backfill...", flush=True)
-    try:
-        token         = get_amazon_token()
-        all_orders    = []
-        created_after = (datetime.utcnow() - timedelta(days=180)).isoformat()
-        next_token    = None
+@app.route("/shopify-fulfillment", methods=["POST"])
+def shopify_fulfillment():
+    print("🛍️ Shopify fulfillment webhook received", flush=True)
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data"}), 400
 
-        # Fetch all orders from last 180 days
-        while True:
-            params = {"MarketplaceIds": MARKETPLACE_ID, "CreatedAfter": created_after}
-            if next_token:
-                params["NextToken"] = next_token
-            r = requests.get(
-                f"{AMAZON_API_BASE}/orders/v0/orders",
-                headers={"x-amz-access-token": token, "Content-Type": "application/json"},
-                params=params,
-                auth=aws_auth,
-                timeout=REQUEST_TIMEOUT
-            )
-            r.raise_for_status()
-            payload    = r.json().get("payload", {})
-            orders     = payload.get("Orders", [])
-            next_token = payload.get("NextToken")
-            all_orders.extend(orders)
-            print(f"📦 Fetched {len(orders)} | Total: {len(all_orders)}", flush=True)
-            if not next_token:
-                break
+    order_id     = str(data.get("id", ""))
+    order_number = str(data.get("order_number", ""))
+    fulfillments = data.get("fulfillments", [])
 
-        print(f"✅ Total orders to backfill: {len(all_orders)}", flush=True)
-        updated = 0
-        skipped = 0
+    if not fulfillments:
+        print("⚠️ No fulfillments in payload", flush=True)
+        return jsonify({"status": "no fulfillments"}), 200
 
-        for order in all_orders:
-            order_id    = order.get("AmazonOrderId", "")
-            ship_by_raw = order.get("LatestShipDate", "") or order.get("EarliestShipDate", "")
-            ship_by     = ship_by_raw[:10] if ship_by_raw else None
+    fulfilled_at   = fulfillments[0].get("created_at", "")
+    fulfilled_date = fulfilled_at[:10] if fulfilled_at else datetime.utcnow().strftime("%Y-%m-%d")
+    print(f"🛍️ Order {order_id} | #{order_number} fulfilled at {fulfilled_date}", flush=True)
 
-            if not ship_by:
-                skipped += 1
-                continue
+    records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_id}'")
+    if not records:
+        records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_number}'")
 
-            # Find existing order in Airtable Orders table
-            records = airtable_search(ORDERS_TABLE_ID, f"{{Order ID}}='{order_id}'")
-            if records:
-                airtable_update(ORDERS_TABLE_ID, records[0]["id"], {
-                    "Ship By": ship_by
-                })
-                print(f"✅ {order_id} → Ship By: {ship_by}", flush=True)
-                updated += 1
-            else:
-                print(f"⚠️ Order not found in Airtable: {order_id}", flush=True)
-                skipped += 1
+    if records:
+        airtable_update(ORDERS_TABLE_ID, records[0]["id"], {"Ship By": fulfilled_date})
+        print(f"✅ Ship By updated to {fulfilled_date}", flush=True)
+    else:
+        print(f"⚠️ Order not found: {order_id} / #{order_number}", flush=True)
 
-        print(f"🎉 Backfill complete: {updated} updated, {skipped} skipped", flush=True)
+    return jsonify({"status": "ok"}), 200
 
-    except Exception as e:
-        print(f"❌ Backfill error: {e}", flush=True)
-
-    @app.route("/backfill-ship-by", methods=["GET"])
-    def backfill_ship_by():
-        print("🔥 /backfill-ship-by HIT", flush=True)
-        thread = threading.Thread(target=backfill_ship_by_job)
-        thread.daemon = True
-        thread.start()
-        return jsonify({
-        "status":  "Backfill started — last 180 days",
-        "message": "Watch Render logs for progress"
-    }), 200
 # ======================================================
 # RUN
 # ======================================================
