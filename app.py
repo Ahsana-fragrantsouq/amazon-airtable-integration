@@ -472,7 +472,7 @@ def sync_all_orders_job():
     try:
         token         = get_amazon_token()
         all_orders    = []
-        created_after = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        created_after = (datetime.utcnow() - timedelta(days=500)).isoformat()
         next_token    = None
 
         while True:
@@ -659,7 +659,7 @@ def download_orders():
         if AMZ_PRODUCTION:
             params = {
                 "MarketplaceIds": MARKETPLACE_ID,
-                "CreatedAfter":   (datetime.utcnow() - timedelta(days=30)).isoformat()
+                "CreatedAfter":   (datetime.utcnow() - timedelta(days=500)).isoformat()
             }
         else:
             params = {"MarketplaceIds": "ATVPDKIKX0DER", "CreatedAfter": "TEST_CASE_200"}
